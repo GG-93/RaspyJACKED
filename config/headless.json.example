@@ -1,0 +1,46 @@
+{
+  "_comment": "RaspyJack Portable Headless Configuration (WiFi CLIENT mode only)",
+  "_instructions": "Copy this file to headless.json and fill in your values. Then run the setup script. This system assumes the Pi is a WiFi CLIENT connecting to an existing network (e.g. phone hotspot). It does NOT create its own access point.",
+
+  "wifi": {
+    "_comment": "The WiFi network the Pi should connect to as a client.",
+    "ssid": "YOUR_WIFI_SSID",
+    "password": "YOUR_WIFI_PASSWORD"
+  },
+
+  "hostname": "Raspyjack",
+
+  "network": {
+    "_comment": "If true, the Pi will prefer this WiFi connection over any Ethernet connection for routing.",
+    "prefer_wifi_over_ethernet": true
+  },
+
+  "tailscale": {
+    "_comment": "Set enabled=true and provide a path to a file containing your Tailscale auth key for automatic connection.",
+    "enabled": true,
+    "auth_key_file": "/root/Raspyjack/config/.tailscale_auth_key"
+  },
+
+  "observed": {
+    "_comment": "Fill these in after setup so you remember how to reach your device.",
+    "tailscale_ipv4": "",
+    "tailscale_magic_dns": "raspyjack.<your-tailnet>.ts.net",
+    "mdns_name": "raspyjack.local",
+    "static_ip_on_wifi": ""
+  },
+
+  "fan_control": {
+    "_comment": "Optional dynamic fan control using a safe GPIO pin.",
+    "enabled": false,
+    "pin": 18,
+    "min_temp_c": 45,
+    "max_temp_c": 70,
+    "min_duty": 20,
+    "max_duty": 100
+  },
+
+  "webui": {
+    "_comment": "Future: automatic creation of a default WebUI user on first boot (not yet implemented).",
+    "create_default_user": false
+  }
+}

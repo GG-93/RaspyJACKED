@@ -1,0 +1,12 @@
+[Unit]
+Description=RaspyJack Safe Shutdown Button (GPIO 17)
+After=multi-user.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /root/Raspyjack/scripts/shutdown_button.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

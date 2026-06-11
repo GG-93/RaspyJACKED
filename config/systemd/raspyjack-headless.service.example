@@ -1,0 +1,14 @@
+[Unit]
+Description=RaspyJack Portable Headless Auto-Setup
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/root/Raspyjack/payloads/utilities/raspyjack_headless_setup.sh
+RemainAfterExit=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

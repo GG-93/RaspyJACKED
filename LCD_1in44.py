@@ -37,7 +37,7 @@ from PIL import Image as PILImage, ImageOps
 # Display type detection from gui_conf.json
 # Supported: "ST7735_128" (128x128), "ST7789_240" (240x240), "CARDPUTER_320" (320x170)
 # ---------------------------------------------------------------------------
-_DISPLAY_TYPE = "ST7735_128"  # default
+_DISPLAY_TYPE = os.environ.get("RJ_DISPLAY_TYPE", "ST7735_128")  # env var overrides gui_conf.json
 
 _CONF_PATHS = [
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "gui_conf.json"),
@@ -56,8 +56,8 @@ for _p in _CONF_PATHS:
 else:
     _FLIP_180 = False
 
-# Hardware auto-detect fallback for CardputerZero
-if _DISPLAY_TYPE != "CARDPUTER_320":
+# Hardware auto-detect fallback for CardputerZero (skip if already HEADLESS)
+if _DISPLAY_TYPE not in ("CARDPUTER_320", "HEADLESS"):
     for _i in range(4):
         try:
             with open(f"/sys/class/graphics/fb{_i}/name", "r") as _fb:
@@ -70,7 +70,15 @@ if _DISPLAY_TYPE != "CARDPUTER_320":
 # ---------------------------------------------------------------------------
 # Resolution constants based on display type
 # ---------------------------------------------------------------------------
-if _DISPLAY_TYPE == "CARDPUTER_320":
+if _DISPLAY_TYPE == "HEADLESS":
+    # Virtual display — no hardware, frames saved to /dev/shm for WebUI + Cardputer streaming
+    LCD_WIDTH  = 128
+    LCD_HEIGHT = 128
+    LCD_X = 0
+    LCD_Y = 0
+    LCD_X_MAXPIXEL = 128
+    LCD_Y_MAXPIXEL = 128
+elif _DISPLAY_TYPE == "CARDPUTER_320":
     LCD_WIDTH  = 320
     LCD_HEIGHT = 170
     LCD_X = 0
@@ -98,9 +106,9 @@ else:
 # All coordinates are authored for 128; S() adapts them to the actual panel.
 # ---------------------------------------------------------------------------
 if _DISPLAY_TYPE == "CARDPUTER_320":
-    LCD_SCALE = LCD_HEIGHT / 128  # 1.328 — use height (constraining dimension) for widescreen
+    LCD_SCALE = LCD_HEIGHT / 128
 else:
-    LCD_SCALE = LCD_WIDTH / 128  # 1.0 on 128x128, 1.875 on 240x240
+    LCD_SCALE = LCD_WIDTH / 128
 
 def S(v):
     """Scale a 128-base pixel value to the current display resolution."""
@@ -479,11 +487,11 @@ class LCD:
     #			initialization
     #********************************************************************************/
     def LCD_Init(self, Lcd_ScanDir=None):
+        if self.display_type in ("HEADLESS", "CARDPUTER_320"):
+            return 0  # no hardware to initialise
+
         if (LCD_Config.GPIO_Init() != 0):
             return -1
-
-        if self.display_type == "CARDPUTER_320":
-            return 0
 
         # Set SPI speed based on display type
         if self.display_type == "ST7789_240":
@@ -537,6 +545,8 @@ class LCD:
         self.LCD_WriteReg(0x2C)
 
     def LCD_Clear(self):
+        if self.display_type == "HEADLESS":
+            return  # nothing to clear
         if self.display_type == "CARDPUTER_320":
             LCD_Config.fb_write(b'\x00' * LCD_Config.FB_SIZE)
             return
@@ -555,7 +565,9 @@ class LCD:
         if imwidth != self.width or imheight != self.height:
             Image = Image.resize((self.width, self.height))
 
-        if self.display_type == "CARDPUTER_320":
+        if self.display_type == "HEADLESS":
+            pass  # no hardware render — frame mirror below still runs
+        elif self.display_type == "CARDPUTER_320":
             img = Image.convert("RGB")
             arr = np.asarray(img)
             r = (arr[..., 0].astype(np.uint16) >> 3) << 11
