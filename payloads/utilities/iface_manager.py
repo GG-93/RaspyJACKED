@@ -39,6 +39,7 @@ import LCD_Config
 from PIL import Image, ImageDraw, ImageFont
 from payloads._display_helper import ScaledDraw, scaled_font
 from payloads._input_helper import get_button
+from payloads._mgmt_iface import get_mgmt_iface, is_mgmt_iface
 
 PINS = {
     "UP": 6, "DOWN": 19, "LEFT": 5, "RIGHT": 26,
@@ -259,6 +260,8 @@ def _set_down(iface):
 
 def _set_monitor(iface):
     """Switch WiFi interface to monitor mode."""
+    if is_mgmt_iface(iface):
+        return f"BLOCKED: {iface} is the management interface — cannot enable monitor mode"
     _run(["sudo", "ip", "link", "set", iface, "down"])
     # Try airmon-ng first
     out = _run(["sudo", "airmon-ng", "start", iface], timeout=15)
@@ -362,7 +365,7 @@ def _get_actions(iface_info):
         mode = iface_info["mode"]
         # wlan0 onboard (brcmfmac) cannot do monitor/injection
         is_onboard = iface_info.get("driver") == "brcmfmac"
-        if mode != "Monitor" and iface_info["supports_mon"] and not is_onboard:
+        if mode != "Monitor" and iface_info["supports_mon"] and not is_onboard and not is_mgmt_iface(name):
             actions.append(("Enable Monitor", lambda: _set_monitor(name)))
         if mode == "Monitor":
             actions.append(("Disable Monitor", lambda: _set_managed(name)))

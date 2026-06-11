@@ -41,6 +41,7 @@ from PIL import Image, ImageDraw, ImageFont
 from payloads._display_helper import ScaledDraw, scaled_font
 from payloads._input_helper import get_button
 from payloads._iface_helper import select_interface, supports_monitor
+from payloads._mgmt_iface import get_mgmt_iface, is_mgmt_iface
 
 try:
     from scapy.all import (
@@ -476,6 +477,15 @@ def main():
         return 1
 
     usb_iface = select_interface(lcd, font, PINS, GPIO, iface_type="wifi")
+    if usb_iface and is_mgmt_iface(usb_iface):
+        img = Image.new("RGB", (WIDTH, HEIGHT), "black")
+        d = ScaledDraw(img)
+        d.text((4, 40), "mgmt iface selected!", font=font, fill="#FF0000")
+        d.text((4, 55), "Connect USB dongle", font=font, fill="#FF0000")
+        lcd.LCD_ShowImage(img, 0, 0)
+        time.sleep(3)
+        GPIO.cleanup()
+        return 1
     if not usb_iface:
         GPIO.cleanup()
         return 1

@@ -48,6 +48,7 @@ from PIL import Image, ImageDraw, ImageFont
 from payloads._display_helper import ScaledDraw, scaled_font
 from payloads._input_helper import get_button
 from payloads._iface_helper import select_interface, supports_monitor
+from payloads._mgmt_iface import get_mgmt_iface, is_mgmt_iface
 
 PINS = {
     "UP": 6, "DOWN": 19, "LEFT": 5, "RIGHT": 26,
@@ -490,6 +491,15 @@ def main():
     global _iface, attack_running
 
     _iface = select_interface(LCD, font, PINS, GPIO, iface_type="wifi")
+    if _iface and is_mgmt_iface(_iface):
+        img = Image.new("RGB", (WIDTH, HEIGHT), "BLACK")
+        draw = ScaledDraw(img)
+        draw.text((2, 40), "mgmt iface selected!", fill="RED", font=font)
+        draw.text((2, 55), "Connect USB dongle", fill="RED", font=font)
+        LCD.LCD_ShowImage(img, 0, 0)
+        time.sleep(3)
+        GPIO.cleanup()
+        return 1
 
     try:
         if not _iface:

@@ -38,6 +38,7 @@ import sys
 import time
 import json
 import signal
+import atexit
 import threading
 import subprocess
 import re
@@ -47,6 +48,7 @@ from urllib.parse import parse_qs
 
 sys.path.append(os.path.abspath(os.path.join(__file__, "..", "..", "..")))
 
+from payloads._mgmt_iface import get_mgmt_iface, is_mgmt_iface
 import RPi.GPIO as GPIO
 import LCD_1in44, LCD_Config
 from PIL import Image, ImageDraw, ImageFont
@@ -470,6 +472,7 @@ def _start_attack(target_ap):
 
     # Setup iptables
     _setup_iptables(iface)
+    atexit.register(_teardown_iptables)
 
     # Start captive portal
     with lock:
@@ -696,6 +699,10 @@ def main():
     global _iface, scroll_pos, selected_idx, view_mode, status_msg
 
     _iface = select_interface(LCD, font, PINS, GPIO, iface_type="wifi")
+    if _iface and is_mgmt_iface(_iface):
+        print(f"[evil_twin] ERROR: {_iface} is the management interface — connect a USB dongle")
+        GPIO.cleanup()
+        return 1
     if not _iface:
         GPIO.cleanup()
         return 1

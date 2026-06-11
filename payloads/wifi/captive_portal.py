@@ -29,6 +29,7 @@ import sys
 import time
 import json
 import signal
+import atexit
 import threading
 import subprocess
 import re
@@ -46,6 +47,7 @@ from payloads._display_helper import ScaledDraw, scaled_font
 from payloads._input_helper import get_button
 from payloads._keyboard_helper import lcd_keyboard
 from payloads._iface_helper import select_interface
+from payloads._mgmt_iface import get_mgmt_iface, is_mgmt_iface
 
 PINS = {
     "UP": 6, "DOWN": 19, "LEFT": 5, "RIGHT": 26,
@@ -574,6 +576,7 @@ def _start_portal():
 
     # Iptables redirect (80 + 443 + DNS)
     _setup_iptables(iface)
+    atexit.register(_teardown_iptables)
 
     label = portal_name if portal_name else "Built-in"
     with lock:
@@ -918,6 +921,14 @@ def main():
 
     # Interface selection at startup
     _iface = select_interface(LCD, font, PINS, GPIO, iface_type="wifi")
+    if _iface and is_mgmt_iface(_iface):
+        img, d = _new_frame()
+        d.text((4, 40), "mgmt iface selected!", font=font, fill="#FF4444")
+        d.text((4, 55), "Connect USB dongle", font=font, fill="#FF4444")
+        LCD.LCD_ShowImage(img, 0, 0)
+        time.sleep(3)
+        GPIO.cleanup()
+        return 1
     if not _iface:
         GPIO.cleanup()
         return 1

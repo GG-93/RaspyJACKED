@@ -227,6 +227,12 @@ setup_network() {
     print_header
     echo "Configuring WiFi client connection..."
 
+    if ! command -v nmcli >/dev/null 2>&1; then
+        echo "  WARNING: nmcli not found — NetworkManager is not installed."
+        echo "  Skipping WiFi profile setup. Configure WiFi manually or install NetworkManager."
+        return
+    fi
+
     local iface
     iface=$(detect_wifi_interface)
     echo "  Using interface: $iface"

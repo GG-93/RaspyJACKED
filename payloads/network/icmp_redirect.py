@@ -27,6 +27,8 @@ import sys
 import time
 import json
 import re
+import signal
+import atexit
 import threading
 import subprocess
 from datetime import datetime
@@ -253,6 +255,21 @@ def _send_redirect(target_ip, gw_ip, my_ip_addr):
         return True
     except Exception:
         return False
+
+
+def _icmp_cleanup():
+    global running, redirecting
+    running = False
+    redirecting = False
+    _run_silent(["sudo", "sysctl", "-w", "net.ipv4.ip_forward=0"])
+
+def _signal_handler_icmp(sig, frame):
+    _icmp_cleanup()
+    raise SystemExit(0)
+
+signal.signal(signal.SIGTERM, _signal_handler_icmp)
+signal.signal(signal.SIGINT, _signal_handler_icmp)
+atexit.register(_icmp_cleanup)
 
 
 def _redirect_loop():

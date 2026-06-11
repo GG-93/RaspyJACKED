@@ -28,6 +28,8 @@ import json
 import struct
 import socket
 import fnmatch
+import signal
+import atexit
 import threading
 import subprocess
 from datetime import datetime
@@ -223,6 +225,14 @@ def _setup_iptables():
         "-i", my_iface, "-p", "udp", "--dport", "53",
         "-j", "REDIRECT", "--to-port", "53",
     ])
+
+
+def _signal_handler_dns(sig, frame):
+    global running
+    running = False
+
+signal.signal(signal.SIGTERM, _signal_handler_dns)
+atexit.register(lambda: _cleanup_iptables())
 
 
 def _cleanup_iptables():

@@ -28,6 +28,8 @@ import time
 import json
 import random
 import struct
+import signal
+import atexit
 import threading
 import subprocess
 import re
@@ -513,6 +515,16 @@ def _start_all():
     if vector_enabled.get("RA", False):
         _ra_thread = threading.Thread(target=_ra_loop, daemon=True)
         _ra_thread.start()
+
+
+def _signal_handler_gw(sig, frame):
+    global running
+    running = False
+    _stop_all()
+
+signal.signal(signal.SIGTERM, _signal_handler_gw)
+signal.signal(signal.SIGINT, _signal_handler_gw)
+atexit.register(_stop_all)
 
 
 def _stop_all():

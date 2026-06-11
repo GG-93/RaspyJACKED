@@ -52,6 +52,12 @@ except Exception as e:
     print(f"Import error: {e}")
     IMPORTS_OK = False
 
+try:
+    from payloads._mgmt_iface import get_mgmt_iface as _get_mgmt_iface
+    _MGMT_GUARD = True
+except Exception:
+    _MGMT_GUARD = False
+
 class FastWiFiSwitcher:
     def __init__(self):
         if not IMPORTS_OK:
@@ -136,6 +142,10 @@ class FastWiFiSwitcher:
     
     def switch_interface_fast(self, target_interface):
         """Ultra-fast interface switching using the fixed integration function."""
+        if _MGMT_GUARD and target_interface == _get_mgmt_iface():
+            self.show_fast("BLOCKED", f"{target_interface}", "is mgmt iface", "Use other dongle", "red")
+            time.sleep(2)
+            return False
         self.show_fast("SWITCHING...", f"To: {target_interface}", "Please wait", "", "yellow")
         
         def lcd_callback(msg):

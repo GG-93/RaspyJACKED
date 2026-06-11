@@ -31,6 +31,7 @@ import sys
 import time
 import json
 import signal
+import atexit
 import threading
 import subprocess
 import re
@@ -448,6 +449,16 @@ def _start_attack():
 
     with lock:
         status_msg = "MITM active"
+
+
+def _signal_handler_arp(sig, frame):
+    global running
+    running = False
+    _stop_attack()
+
+signal.signal(signal.SIGTERM, _signal_handler_arp)
+signal.signal(signal.SIGINT, _signal_handler_arp)
+atexit.register(_stop_attack)
 
 
 def _stop_attack():

@@ -35,6 +35,7 @@ from PIL import Image, ImageFont
 from payloads._display_helper import ScaledDraw, scaled_font
 from payloads._input_helper import get_button
 from payloads._iface_helper import select_interface, supports_monitor
+from payloads._mgmt_iface import get_mgmt_iface, is_mgmt_iface
 
 # Optional scapy for handshake capture mode
 try:
@@ -125,7 +126,7 @@ def _detect_webui_interface():
     return "wlan0"
 
 
-WEBUI_INTERFACE = _detect_webui_interface()
+WEBUI_INTERFACE = get_mgmt_iface()  # authoritative: respects env var, headless.json, nmcli
 
 # ---------------------------------------------------------------------------
 # Logging

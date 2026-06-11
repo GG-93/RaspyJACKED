@@ -36,6 +36,7 @@ import re
 import json
 import time
 import signal
+import atexit
 import threading
 import subprocess
 from datetime import datetime
@@ -44,6 +45,7 @@ from urllib.parse import parse_qs
 
 sys.path.append(os.path.abspath(os.path.join(__file__, "..", "..", "..")))
 
+from payloads._mgmt_iface import get_mgmt_iface, is_mgmt_iface
 import RPi.GPIO as GPIO
 import LCD_1in44, LCD_Config
 from PIL import Image, ImageDraw, ImageFont
@@ -515,6 +517,7 @@ def _start_ap(ssid):
         ["sudo", "sh", "-c", "echo 1 > /proc/sys/net/ipv4/ip_forward"],
     ]:
         subprocess.run(cmd, capture_output=True, timeout=5)
+    atexit.register(_stop_ap)
 
     try:
         _portal_server = HTTPServer(("0.0.0.0", PORTAL_PORT), _PortalHandler)
@@ -739,6 +742,10 @@ def main():
     global _iface, scroll_pos, view_mode, status_msg
 
     _iface = select_interface(LCD, font, PINS, GPIO, iface_type="wifi")
+    if _iface and is_mgmt_iface(_iface):
+        print(f"[karma_ap] ERROR: {_iface} is the management interface — connect a USB dongle")
+        GPIO.cleanup()
+        return 1
     if not _iface:
         GPIO.cleanup()
         return 1

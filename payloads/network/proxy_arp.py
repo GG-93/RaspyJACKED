@@ -29,6 +29,8 @@ import os
 import sys
 import time
 import json
+import signal
+import atexit
 import threading
 import subprocess
 import re
@@ -252,6 +254,22 @@ def _proxy_thread():
             status_msg = f"Err: {exc}"
     finally:
         proxy_active = False
+
+
+def _proxy_cleanup():
+    global app_running, proxy_active
+    app_running = False
+    proxy_active = False
+    _disable_ip_forward()
+    _restore_arp()
+
+def _signal_handler_proxy(sig, frame):
+    _proxy_cleanup()
+    raise SystemExit(0)
+
+signal.signal(signal.SIGTERM, _signal_handler_proxy)
+signal.signal(signal.SIGINT, _signal_handler_proxy)
+atexit.register(_proxy_cleanup)
 
 
 def _restore_arp():

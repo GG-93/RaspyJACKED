@@ -35,6 +35,13 @@ except Exception as e:
     print(f"❌ Import error: {e}")
     IMPORTS_OK = False
 
+sys.path.append('/root/Raspyjack/')
+try:
+    from payloads._mgmt_iface import get_mgmt_iface as _get_mgmt_iface
+    _MGMT_GUARD = True
+except Exception:
+    _MGMT_GUARD = False
+
 def show_usage():
     """Show usage information."""
     print("WiFi Interface Switcher")
@@ -101,7 +108,21 @@ def cmd_switch(interface):
         print(f"❌ {interface} is not a WiFi interface!")
         print("Use: wlan0, wlan1, wlan2, etc.")
         return False
-    
+
+    # Guard: refuse to switch to the management interface
+    if _MGMT_GUARD and interface == _get_mgmt_iface():
+        print(f"❌ {interface} is the management interface (WebUI/hotspot connection).")
+        print("Switching the management interface here would drop your WebUI connection.")
+        print("Use the headless setup script to reconfigure the management interface.")
+        return False
+
+    # Pre-check: target interface must already be connected
+    status = get_interface_status(interface)
+    if not status.get('connected') or not status.get('ip'):
+        print(f"❌ Target interface {interface} is not connected or has no IP.")
+        print("Connect it to a network first, then switch.")
+        return False
+
     # Perform the switch
     success = set_raspyjack_interface(interface)
     

@@ -116,6 +116,20 @@ if [[ "$FAN_ENABLED" == "true" ]]; then
     prompt FAN_MAX_DUTY "Max fan duty %"                  "100"
 fi
 
+# --- Check for existing config ---
+
+if [[ -f "$CONFIG_FILE" ]]; then
+    echo ""
+    echo "⚠️  A config file already exists at ${CONFIG_FILE}"
+    read -rp "  Overwrite it with new settings? [y/N]: " _overwrite
+    if [[ ! "$_overwrite" =~ ^[Yy] ]]; then
+        echo ""
+        echo "Keeping existing config. Run the setup script to apply it:"
+        echo "  sudo ${PROJECT_ROOT}/payloads/utilities/raspyjack_headless_setup.sh"
+        exit 0
+    fi
+fi
+
 # --- Write config ---
 
 cat > "$CONFIG_FILE" <<EOF

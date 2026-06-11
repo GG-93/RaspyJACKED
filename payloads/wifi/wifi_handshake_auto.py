@@ -43,6 +43,7 @@ from PIL import Image, ImageDraw, ImageFont
 from payloads._display_helper import ScaledDraw, scaled_font
 from payloads._input_helper import get_button
 from payloads._iface_helper import select_interface, supports_monitor
+from payloads._mgmt_iface import get_mgmt_iface, is_mgmt_iface
 
 try:
     from scapy.all import (
@@ -131,9 +132,13 @@ def _find_external_wifi():
 # ── Monitor mode helpers ────────────────────────────────────────────────────
 
 def _enable_monitor(iface):
-    # Kill interfering processes first (NetworkManager, wpa_supplicant, etc.)
-    subprocess.run(["sudo", "airmon-ng", "check", "kill"],
-                   capture_output=True, timeout=10)
+    # Kill interfering processes on THIS interface only — do NOT use
+    # "airmon-ng check kill" which kills ALL wpa_supplicant instances
+    # system-wide and would sever the WebUI hotspot connection.
+    subprocess.run(["sudo", "pkill", "-f", f"wpa_supplicant.*{iface}"],
+                   capture_output=True, timeout=5)
+    subprocess.run(["sudo", "nmcli", "device", "set", iface, "managed", "no"],
+                   capture_output=True, timeout=5)
     subprocess.run(["sudo", "ip", "link", "set", iface, "down"],
                    capture_output=True, timeout=5)
     result = subprocess.run(["sudo", "iw", iface, "set", "type", "monitor"],
@@ -499,6 +504,11 @@ def main():
     global scroll_pos, deauth_enabled, status_msg, _selected_iface
 
     _selected_iface = select_interface(LCD, font, PINS, GPIO, iface_type="wifi")
+    if _selected_iface and is_mgmt_iface(_selected_iface):
+        with lock:
+            status_msg = f"Cannot use {_selected_iface} (mgmt)"
+        GPIO.cleanup()
+        return 1
     if not _selected_iface:
         GPIO.cleanup()
         return 1

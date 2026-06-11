@@ -34,6 +34,8 @@ import sys
 import re
 import json
 import time
+import signal
+import atexit
 import threading
 import subprocess
 from datetime import datetime
@@ -216,6 +218,15 @@ def _start_responder():
 
     # Start hash monitoring thread
     threading.Thread(target=_monitor_hashes, daemon=True).start()
+
+
+def _signal_handler_relay(sig, frame):
+    _stop_responder()
+    raise SystemExit(0)
+
+signal.signal(signal.SIGTERM, _signal_handler_relay)
+signal.signal(signal.SIGINT, _signal_handler_relay)
+atexit.register(_stop_responder)
 
 
 def _stop_responder():
