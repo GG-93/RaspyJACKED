@@ -74,6 +74,7 @@ parse_with_jq() {
     WIFI_PASS=$(jq -r '.wifi.password // empty' "$CONFIG_FILE")
     HOSTNAME=$(jq -r '.hostname // "raspyjack"' "$CONFIG_FILE")
     PREFER_WIFI=$(jq -r '.network.prefer_wifi_over_ethernet // true' "$CONFIG_FILE")
+    WIFI_IFACE_PREF=$(jq -r '.wifi.interface // "auto"' "$CONFIG_FILE")
     TAILSCALE_ENABLED=$(jq -r '.tailscale.enabled // false' "$CONFIG_FILE")
     TAILSCALE_KEY_FILE=$(jq -r '.tailscale.auth_key_file // ""' "$CONFIG_FILE")
     FAN_ENABLED=$(jq -r '.fan_control.enabled // false' "$CONFIG_FILE")
@@ -127,6 +128,7 @@ print(data.get('fan_control', {}).get('pin', 18))
 " <<< "$json")
 
     PREFER_WIFI=true
+    WIFI_IFACE_PREF=auto
 }
 
 parse_with_grep() {
@@ -138,6 +140,7 @@ parse_with_grep() {
     FAN_ENABLED=false
     FAN_PIN=18
     PREFER_WIFI=true
+    WIFI_IFACE_PREF=auto
 }
 
 validate_required_fields() {
@@ -164,8 +167,11 @@ validate_required_fields() {
 
 validate_config_only() {
     load_config
+    local iface
+    iface=$(detect_wifi_interface)
     echo "✓ Config looks valid"
     echo "  WiFi SSID:        ${WIFI_SSID}"
+    echo "  WiFi Interface:   ${iface} (pref: ${WIFI_IFACE_PREF})"
     echo "  Hostname:         ${HOSTNAME}"
     echo "  Tailscale:        ${TAILSCALE_ENABLED}"
     echo "  Fan Control:      ${FAN_ENABLED} (pin ${FAN_PIN})"
@@ -174,27 +180,101 @@ validate_config_only() {
 
 # --- Core Setup Functions ---
 
+# Detect which WiFi interface to use for the management (hotspot) connection.
+# - "auto": prefer USB dongle (wlan1+) if present, fall back to onboard (wlan0)
+# - "wlan0" / "wlan1" / etc: use exactly that interface
+# Returns the interface name via stdout.
+detect_wifi_interface() {
+    local pref="${WIFI_IFACE_PREF:-auto}"
+
+    if [[ "$pref" != "auto" ]]; then
+        # Explicit preference — verify it exists
+        if ip link show "$pref" >/dev/null 2>&1; then
+            echo "$pref"
+            return
+        fi
+        echo "WARNING: Requested interface '$pref' not found, falling back to auto-detect." >&2
+    fi
+
+    # Auto-detect: scan /sys/class/net for WiFi interfaces, prefer USB over onboard
+    local usb_iface="" onboard_iface=""
+    for dev in /sys/class/net/wlan*; do
+        [[ -e "$dev" ]] || continue
+        local iface devpath
+        iface="$(basename "$dev")"
+        devpath="$(readlink -f "$dev/device" 2>/dev/null || true)"
+        if echo "$devpath" | grep -q "usb"; then
+            # Pick the first USB dongle found (works on any port)
+            [[ -z "$usb_iface" ]] && usb_iface="$iface"
+        elif echo "$devpath" | grep -q "mmc\|platform"; then
+            [[ -z "$onboard_iface" ]] && onboard_iface="$iface"
+        fi
+    done
+
+    if [[ -n "$usb_iface" ]]; then
+        echo "  [auto] USB dongle detected: $usb_iface (preferred over onboard)" >&2
+        echo "$usb_iface"
+    elif [[ -n "$onboard_iface" ]]; then
+        echo "  [auto] No USB dongle found, using onboard: $onboard_iface" >&2
+        echo "$onboard_iface"
+    else
+        echo "  [auto] No wlan interfaces found, defaulting to wlan0" >&2
+        echo "wlan0"
+    fi
+}
+
 setup_network() {
     print_header
     echo "Configuring WiFi client connection..."
 
-    nmcli connection delete "$WIFI_SSID" 2>/dev/null || true
+    local iface
+    iface=$(detect_wifi_interface)
+    echo "  Using interface: $iface"
 
-    nmcli connection add type wifi ifname wlan0 con-name "$WIFI_SSID" ssid "$WIFI_SSID" \
-        autoconnect yes autoconnect-priority 100 \
-        ipv4.route-metric 5 \
+    # Remove ALL existing profiles for this SSID to prevent accumulation
+    while nmcli -t -f NAME,TYPE con show | awk -F: '$2=="802-11-wireless"{print $1}' | \
+          xargs -I{} sh -c 'nmcli -t -f 802-11-wireless.ssid con show "{}" 2>/dev/null | grep -qF "'"$WIFI_SSID"'" && echo "{}"' | \
+          grep -q .; do
+        local old_name
+        old_name=$(nmcli -t -f NAME,TYPE con show | awk -F: '$2=="802-11-wireless"{print $1}' | \
+                   xargs -I{} sh -c 'nmcli -t -f 802-11-wireless.ssid con show "{}" 2>/dev/null | grep -qF "'"$WIFI_SSID"'" && echo "{}"' | head -1)
+        [[ -z "$old_name" ]] && break
+        echo "  Removing old profile: $old_name"
+        nmcli connection delete "$old_name" 2>/dev/null || break
+    done
+
+    # Add fresh connection — DHCP only, no static IP, no hardcoded gateway
+    nmcli connection add \
+        type wifi \
+        ifname "$iface" \
+        con-name "$WIFI_SSID" \
+        ssid "$WIFI_SSID" \
+        autoconnect yes \
+        autoconnect-priority 100 \
+        ipv4.method auto \
+        ipv4.route-metric 50 \
         802-11-wireless-security.key-mgmt wpa-psk \
         802-11-wireless-security.psk "$WIFI_PASS" >/dev/null 2>&1 || true
 
     if [[ "$PREFER_WIFI" == "true" ]]; then
         for profile in "Wired connection 1" "Wired connection 2" "eth0" "netplan-eth0"; do
-            nmcli connection modify "$profile" ipv4.route-metric 2000 2>/dev/null || true
+            nmcli connection modify "$profile" ipv4.route-metric 200 2>/dev/null || true
         done
     fi
 
-    nmcli connection up "$WIFI_SSID" || true
-    sleep 4
+    # Bring up with a timeout — don't hang forever if hotspot is off
+    echo "  Connecting to '$WIFI_SSID'..."
+    if nmcli connection up "$WIFI_SSID" --wait-device-timeout 15 2>/dev/null; then
+        local ip
+        ip=$(ip -4 addr show "$iface" 2>/dev/null | grep "inet " | awk '{print $2}' | cut -d/ -f1 || echo "")
+        echo "  Connected — IP: ${ip:-pending}"
+    else
+        echo "  WARNING: Could not connect to '$WIFI_SSID' right now."
+        echo "  The profile is saved — Pi will auto-connect when hotspot is in range."
+    fi
+
     echo "WiFi client configuration complete."
+    echo "  Access WebUI at: http://raspyjack.local:8080"
 }
 
 set_hostname() {

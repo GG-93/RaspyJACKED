@@ -5,7 +5,9 @@
   "wifi": {
     "_comment": "The WiFi network the Pi should connect to as a client.",
     "ssid": "YOUR_WIFI_SSID",
-    "password": "YOUR_WIFI_PASSWORD"
+    "password": "YOUR_WIFI_PASSWORD",
+    "_interface_comment": "Which WiFi adapter to use for the hotspot connection. 'auto' = prefer USB dongle over onboard (recommended). Use 'wlan0' to force onboard, 'wlan1' to force external dongle. USB dongle works in ANY port.",
+    "interface": "auto"
   },
 
   "hostname": "Raspyjack",
