@@ -113,7 +113,23 @@ TOKEN = _load_shared_token()
 AUTH_SECRET = _load_or_create_auth_secret()
 
 # WebUI only listens on these interfaces — wlan1+ are for attacks/monitor mode
-WEBUI_INTERFACES = ["eth0", "eth1", "wlan0", "tailscale0"]
+# Build dynamically so tailscale0 (and other optional interfaces) don't cause
+# errors when they aren't present. Override via RJ_WEBUI_INTERFACES env var.
+def _build_webui_interfaces() -> list[str]:
+    _env = os.environ.get("RJ_WEBUI_INTERFACES", "").strip()
+    if _env:
+        return [i.strip() for i in _env.split(",") if i.strip()]
+    base = ["eth0", "eth1", "wlan0"]
+    optional = ["tailscale0", "usb0"]  # only add if the interface actually exists
+    for iface in optional:
+        try:
+            if os.path.exists(f"/sys/class/net/{iface}"):
+                base.append(iface)
+        except Exception:
+            pass
+    return base
+
+WEBUI_INTERFACES = _build_webui_interfaces()
 
 
 def _get_interface_ip(interface: str) -> str | None:
@@ -320,7 +336,15 @@ def _regenerate_caddyfile_and_reload() -> None:
     without re-running the install script.
     """
     hosts: list[str] = []
-    for iface in ("eth0", "wlan0", "tailscale0"):
+    # Enumerate all interfaces that actually have IPv4 addresses rather than
+    # hardcoding a list — this handles Tailscale being absent, USB dongles, etc.
+    try:
+        net_devs = os.listdir("/sys/class/net")
+    except Exception:
+        net_devs = ["eth0", "wlan0"]
+    # Order: eth first, then wlan, then everything else (keeps Caddy output stable)
+    ordered = sorted(net_devs, key=lambda x: (0 if x.startswith("eth") else 1 if x.startswith("wlan") else 2, x))
+    for iface in ordered:
         try:
             res = subprocess.run(
                 ["ip", "-4", "-o", "addr", "show", iface],

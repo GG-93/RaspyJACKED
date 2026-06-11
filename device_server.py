@@ -50,9 +50,23 @@ PING_INTERVAL = 15
 VERBOSE_INPUT_LOGS = os.environ.get("RJ_WS_VERBOSE_INPUT", "0") == "1"
 
 # WebSocket server only listens on these interfaces — wlan1+ are for attacks
-# Override via RJ_WEBUI_INTERFACES env var (comma-separated)
-_env_ifaces = os.environ.get("RJ_WEBUI_INTERFACES", "").strip()
-WEBUI_INTERFACES = [i.strip() for i in _env_ifaces.split(",") if i.strip()] if _env_ifaces else ["eth0", "eth1", "wlan0", "tailscale0"]
+# Override via RJ_WEBUI_INTERFACES env var (comma-separated).
+# Built dynamically so optional interfaces (tailscale0, usb0) don't cause errors
+# when they aren't installed.
+def _build_webui_interfaces() -> list:
+    _env = os.environ.get("RJ_WEBUI_INTERFACES", "").strip()
+    if _env:
+        return [i.strip() for i in _env.split(",") if i.strip()]
+    base = ["eth0", "eth1", "wlan0"]
+    for iface in ["tailscale0", "usb0"]:
+        try:
+            if os.path.exists(f"/sys/class/net/{iface}"):
+                base.append(iface)
+        except Exception:
+            pass
+    return base
+
+WEBUI_INTERFACES = _build_webui_interfaces()
 
 
 def _load_shared_token():

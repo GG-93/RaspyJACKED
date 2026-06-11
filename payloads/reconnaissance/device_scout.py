@@ -40,6 +40,7 @@ from PIL import Image
 from payloads._display_helper import ScaledDraw, scaled_font
 from payloads._input_helper import get_button
 from payloads._iface_helper import list_interfaces
+from payloads._mgmt_iface import get_mgmt_iface
 
 try:
     from scapy.all import (
@@ -403,7 +404,8 @@ def start_all():
             chs = [ALL_CHANNELS[i] for i in range(idx, len(ALL_CHANNELS), n)]
             threading.Thread(target=_hop_worker, args=(iface, chs), daemon=True).start()
 
-    if os.path.isdir("/sys/class/net/wlan0/wireless"):
+    # Only launch iw scan worker if wlan0 is not the management interface
+    if os.path.isdir("/sys/class/net/wlan0/wireless") and "wlan0" != get_mgmt_iface():
         threading.Thread(target=_iw_scan_worker, daemon=True).start()
 
     # BLE via bleak (same as ble_scanner — works reliably)

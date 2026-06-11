@@ -36,6 +36,7 @@ from PIL import Image, ImageDraw, ImageFont
 from payloads._display_helper import ScaledDraw, scaled_font
 from payloads._input_helper import get_button
 from payloads._iface_helper import select_interface
+from payloads._mgmt_iface import get_mgmt_iface
 
 # ---------------------------------------------------------------------------
 # Pin / LCD setup
@@ -77,10 +78,25 @@ arp_entries = []  # [{"ip", "mac", "iface"}]
 # WiFi scan
 # ---------------------------------------------------------------------------
 def _scan_wifi():
-    """Scan nearby WiFi APs via iw dev wlan0 scan."""
+    """Scan nearby WiFi APs via iw dev scan on a non-management interface."""
+    # Prefer a secondary wlan interface so we don't disrupt the management
+    # (hotspot) connection. Fall back to wlan0 only if it is not the mgmt iface.
+    _mgmt = get_mgmt_iface()
+    scan_iface = None
+    try:
+        for name in sorted(os.listdir("/sys/class/net")):
+            if name.startswith("wlan") and name != _mgmt:
+                scan_iface = name
+                break
+    except Exception:
+        pass
+    if scan_iface is None and "wlan0" != _mgmt:
+        scan_iface = "wlan0"
+    if scan_iface is None:
+        return []  # All wlan interfaces are the management interface — skip scan
     try:
         result = subprocess.run(
-            ["iw", "dev", "wlan0", "scan"],
+            ["iw", "dev", scan_iface, "scan"],
             capture_output=True, text=True, timeout=15,
         )
     except FileNotFoundError:

@@ -52,6 +52,7 @@ from PIL import Image, ImageDraw, ImageEnhance
 from payloads._display_helper import ScaledDraw, scaled_font, S
 from payloads._input_helper import get_button
 from payloads._iface_helper import list_interfaces
+from payloads._mgmt_iface import get_mgmt_iface
 
 try:
     from scapy.all import (
@@ -2634,8 +2635,11 @@ def main():
                         t.start()
                         threads.append(t)
 
-                    # Always include wlan0 as scanner
-                    if os.path.isdir("/sys/class/net/wlan0/wireless"):
+                    # Optionally include onboard wlan as a scanner, but NEVER
+                    # use the management interface — it handles the hotspot
+                    # connection that keeps the WebUI reachable.
+                    _mgmt = get_mgmt_iface()
+                    if os.path.isdir("/sys/class/net/wlan0/wireless") and "wlan0" != _mgmt:
                         wlan0_in_use = "wlan0" in active_cards or (monitor_card == "wlan0")
                         if not wlan0_in_use:
                             card_state["wlan0"] = {

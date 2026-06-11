@@ -768,52 +768,86 @@ def force_interface_as_default(interface):
         else:
             print(f"✅ Found gateway: {gateway}")
         
-        # STEP 3: Show current route before change
-        print(f"🔍 Step 3: Current routing before change...")
-        current_route = subprocess.run(['ip', 'route', 'show', 'default'], 
+        # STEP 3: Show current routes and save them for rollback
+        print(f"🔍 Step 3: Saving current routing state for rollback...")
+        current_route = subprocess.run(['ip', 'route', 'show', 'default'],
                                      capture_output=True, text=True, timeout=2)
-        if current_route.returncode == 0:
+        saved_default_routes = []
+        if current_route.returncode == 0 and current_route.stdout.strip():
             print(f"   Current default: {current_route.stdout.strip()}")
-        
-        # STEP 4: FORCE remove ALL default routes
+            saved_default_routes = [line.strip() for line in current_route.stdout.strip().split('\n') if line.strip()]
+
+        # STEP 3b: Verify gateway is actually reachable BEFORE touching routes
+        print(f"🔍 Step 3b: Verifying gateway {gateway} is reachable...")
+        ping_result = subprocess.run(
+            ['ping', '-c', '2', '-W', '2', '-I', interface, gateway],
+            capture_output=True, text=True, timeout=8
+        )
+        if ping_result.returncode != 0:
+            # Try arping as a fallback (works even without ICMP)
+            arping_result = subprocess.run(
+                ['arping', '-c', '2', '-w', '3', '-I', interface, gateway],
+                capture_output=True, text=True, timeout=8
+            )
+            if arping_result.returncode != 0:
+                print(f"❌ Gateway {gateway} is not reachable on {interface} — aborting to preserve connectivity")
+                print(f"   ping: {ping_result.stderr.strip()}")
+                return False
+            else:
+                print(f"✅ Gateway reachable via ARP")
+        else:
+            print(f"✅ Gateway {gateway} is reachable")
+
+        # STEP 4: FORCE remove ALL default routes (safe now — gateway verified above)
         print(f"🗑️  Step 4: Removing all default routes...")
-        remove_result = subprocess.run(['ip', 'route', 'del', 'default'], 
-                                     capture_output=True, text=True, check=False)
+        # Remove all default routes (may need multiple passes if there are several)
+        for _ in range(5):
+            remove_result = subprocess.run(['ip', 'route', 'del', 'default'],
+                                         capture_output=True, text=True, check=False)
+            if remove_result.returncode != 0:
+                break  # No more default routes to remove
         print(f"   Remove result: return_code={remove_result.returncode}")
-        if remove_result.stderr:
+        if remove_result.stderr and 'No such process' not in remove_result.stderr:
             print(f"   Remove stderr: {remove_result.stderr}")
-        
+
         # Verify removal
-        verify_remove = subprocess.run(['ip', 'route', 'show', 'default'], 
+        verify_remove = subprocess.run(['ip', 'route', 'show', 'default'],
                                      capture_output=True, text=True, timeout=2)
         if verify_remove.returncode == 0 and verify_remove.stdout.strip():
             print(f"⚠️  Still have default route after removal: {verify_remove.stdout.strip()}")
         else:
             print(f"✅ Successfully removed default routes")
-        
+
         # STEP 5: Add new default route
         print(f"➕ Step 5: Adding new default route...")
         add_cmd = ['ip', 'route', 'add', 'default', 'via', gateway, 'dev', interface, 'metric', '100']
         print(f"   Command: {' '.join(add_cmd)}")
-        
+
         add_result = subprocess.run(add_cmd, capture_output=True, text=True, timeout=3)
         print(f"   Add result: return_code={add_result.returncode}")
-        
+
         if add_result.returncode != 0:
-            print(f"❌ Failed to add route")
+            print(f"❌ Failed to add route — restoring saved routes...")
             print(f"   Add stdout: {add_result.stdout}")
             print(f"   Add stderr: {add_result.stderr}")
+            # Attempt rollback so Pi doesn't lose all connectivity
+            for saved_route in saved_default_routes:
+                try:
+                    subprocess.run(['ip', 'route', 'add'] + saved_route.split(),
+                                   capture_output=True, text=True, timeout=3, check=False)
+                except Exception:
+                    pass
             return False
-        
+
         # STEP 6: VERIFY the route was actually added
         print(f"🔍 Step 6: Verifying new route...")
-        verify_result = subprocess.run(['ip', 'route', 'show', 'default'], 
+        verify_result = subprocess.run(['ip', 'route', 'show', 'default'],
                                      capture_output=True, text=True, timeout=2)
-        
+
         if verify_result.returncode == 0:
             new_route = verify_result.stdout.strip()
             print(f"   New default route: {new_route}")
-            
+
             # Check if our interface is in the new route
             if interface in new_route:
                 print(f"✅ VERIFIED: {interface} is now the default route!")
@@ -825,18 +859,42 @@ def force_interface_as_default(interface):
         else:
             print(f"❌ Could not verify new route")
             return False
-        
-        # STEP 7: Update DNS immediately  
+
+        # STEP 7: Update DNS
+        # Use resolvectl if systemd-resolved is active; fall back to resolv.conf
+        # only when it is a real file (not a symlink to systemd-resolved).
         print(f"🌐 Step 7: Updating DNS...")
+        dns_servers = ["8.8.8.8", "8.8.4.4"]
+        # Put gateway first if it looks like a private nameserver
+        gateway_parts = gateway.split('.')
+        if len(gateway_parts) == 4:
+            dns_servers.insert(0, gateway)
         try:
-            with open('/etc/resolv.conf', 'w') as f:
-                f.write(f"# RaspyJack forced DNS for {interface} - {datetime.now()}\n")
-                f.write(f"nameserver {gateway}\n")
-                f.write("nameserver 8.8.8.8\n")
-                f.write("nameserver 8.8.4.4\n")
-            print(f"✅ DNS updated")
-        except Exception as dns_error:
-            print(f"⚠️  DNS update failed: {dns_error}")
+            resolvectl_check = subprocess.run(['resolvectl', 'status'],
+                                              capture_output=True, timeout=3)
+            if resolvectl_check.returncode == 0:
+                subprocess.run(
+                    ['resolvectl', 'dns', interface] + dns_servers,
+                    capture_output=True, timeout=5, check=False
+                )
+                print(f"✅ DNS updated via resolvectl")
+            else:
+                raise RuntimeError("resolvectl not active")
+        except Exception:
+            # Only write resolv.conf if it is NOT a symlink (i.e. not managed by systemd-resolved)
+            import os as _os
+            resolv = '/etc/resolv.conf'
+            if not _os.path.islink(resolv):
+                try:
+                    with open(resolv, 'w') as f:
+                        f.write(f"# RaspyJack forced DNS for {interface} - {datetime.now()}\n")
+                        for ns in dns_servers:
+                            f.write(f"nameserver {ns}\n")
+                    print(f"✅ DNS updated via resolv.conf")
+                except Exception as dns_error:
+                    print(f"⚠️  DNS update failed: {dns_error}")
+            else:
+                print(f"⚠️  /etc/resolv.conf is managed by systemd-resolved — skipping direct write")
         
         print(f"🎉 SUCCESS: {interface} is now the system default!")
         print(f"   Interface: {interface}")
