@@ -79,6 +79,10 @@ parse_with_jq() {
     TAILSCALE_KEY_FILE=$(jq -r '.tailscale.auth_key_file // ""' "$CONFIG_FILE")
     FAN_ENABLED=$(jq -r '.fan_control.enabled // false' "$CONFIG_FILE")
     FAN_PIN=$(jq -r '.fan_control.pin // 18' "$CONFIG_FILE")
+    WLAN_STATIC_IP=$(jq -r '.network.wlan_static_ip // ""' "$CONFIG_FILE")
+    WLAN_GATEWAY=$(jq -r '.network.wlan_gateway // ""' "$CONFIG_FILE")
+    ETH_STATIC_IP=$(jq -r '.network.eth_static_ip // ""' "$CONFIG_FILE")
+    ETH_DHCP_SERVER=$(jq -r '.network.eth_dhcp_server // true' "$CONFIG_FILE")
 }
 
 parse_with_python() {
@@ -129,6 +133,26 @@ print(data.get('fan_control', {}).get('pin', 18))
 
     PREFER_WIFI=true
     WIFI_IFACE_PREF=auto
+    WLAN_STATIC_IP=$(python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+print(data.get('network', {}).get('wlan_static_ip', ''))
+" <<< "$json")
+    WLAN_GATEWAY=$(python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+print(data.get('network', {}).get('wlan_gateway', ''))
+" <<< "$json")
+    ETH_STATIC_IP=$(python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+print(data.get('network', {}).get('eth_static_ip', ''))
+" <<< "$json")
+    ETH_DHCP_SERVER=$(python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+print(str(data.get('network', {}).get('eth_dhcp_server', True)).lower())
+" <<< "$json")
 }
 
 parse_with_grep() {
@@ -141,6 +165,10 @@ parse_with_grep() {
     FAN_PIN=18
     PREFER_WIFI=true
     WIFI_IFACE_PREF=auto
+    WLAN_STATIC_IP=""
+    WLAN_GATEWAY=""
+    ETH_STATIC_IP="192.168.100.1"
+    ETH_DHCP_SERVER=true
 }
 
 validate_required_fields() {
@@ -249,18 +277,41 @@ setup_network() {
         nmcli connection delete "$old_name" 2>/dev/null || break
     done
 
-    # Add fresh connection — DHCP only, no static IP, no hardcoded gateway
-    nmcli connection add \
-        type wifi \
-        ifname "$iface" \
-        con-name "$WIFI_SSID" \
-        ssid "$WIFI_SSID" \
-        autoconnect yes \
-        autoconnect-priority 100 \
-        ipv4.method auto \
-        ipv4.route-metric 50 \
-        802-11-wireless-security.key-mgmt wpa-psk \
-        802-11-wireless-security.psk "$WIFI_PASS" >/dev/null 2>&1 || true
+    # Build IP config for the WiFi profile
+    local wlan_ip="${WLAN_STATIC_IP:-}"
+    local wlan_gw="${WLAN_GATEWAY:-}"
+
+    if [[ -n "$wlan_ip" && -n "$wlan_gw" ]]; then
+        # Static IP mode — Pi always has the same address on this hotspot
+        echo "  Using static IP: $wlan_ip (gateway $wlan_gw)"
+        nmcli connection add \
+            type wifi \
+            ifname "$iface" \
+            con-name "$WIFI_SSID" \
+            ssid "$WIFI_SSID" \
+            autoconnect yes \
+            autoconnect-priority 100 \
+            ipv4.method manual \
+            ipv4.addresses "${wlan_ip}/24" \
+            ipv4.gateway "$wlan_gw" \
+            ipv4.dns "8.8.8.8,1.1.1.1" \
+            ipv4.route-metric 50 \
+            802-11-wireless-security.key-mgmt wpa-psk \
+            802-11-wireless-security.psk "$WIFI_PASS" >/dev/null 2>&1 || true
+    else
+        # DHCP mode (default)
+        nmcli connection add \
+            type wifi \
+            ifname "$iface" \
+            con-name "$WIFI_SSID" \
+            ssid "$WIFI_SSID" \
+            autoconnect yes \
+            autoconnect-priority 100 \
+            ipv4.method auto \
+            ipv4.route-metric 50 \
+            802-11-wireless-security.key-mgmt wpa-psk \
+            802-11-wireless-security.psk "$WIFI_PASS" >/dev/null 2>&1 || true
+    fi
 
     if [[ "$PREFER_WIFI" == "true" ]]; then
         for profile in "Wired connection 1" "Wired connection 2" "eth0" "netplan-eth0"; do
@@ -280,7 +331,62 @@ setup_network() {
     fi
 
     echo "WiFi client configuration complete."
-    echo "  Access WebUI at: http://raspyjack.local:8080"
+    if [[ -n "${WLAN_STATIC_IP:-}" ]]; then
+        echo "  Access WebUI at: http://${WLAN_STATIC_IP}:8080"
+    else
+        echo "  Access WebUI at: http://raspyjack.local:8080  (or check phone hotspot for Pi IP)"
+    fi
+}
+
+
+setup_eth_direct() {
+    local static_ip="${ETH_STATIC_IP:-}"
+    local dhcp="${ETH_DHCP_SERVER:-true}"
+
+    [[ -z "$static_ip" ]] && return
+
+    print_header
+    echo "Configuring direct Ethernet access (eth0)..."
+    echo "  Static IP: $static_ip — any computer plugging in will get an IP automatically."
+
+    # Remove old raspyjack-eth-direct profile if it exists
+    nmcli connection delete "raspyjack-eth-direct" 2>/dev/null || true
+
+    if [[ "$dhcp" == "true" ]]; then
+        # "shared" mode: Pi gets static IP + NM runs built-in DHCP server on eth0.
+        # Any computer plugging in gets an IP — no config needed on the other end.
+        # NM requires dnsmasq for shared mode.
+        if ! command -v dnsmasq >/dev/null 2>&1; then
+            apt-get install -y dnsmasq >/dev/null 2>&1 || true
+        fi
+
+        nmcli connection add \
+            type ethernet \
+            ifname eth0 \
+            con-name "raspyjack-eth-direct" \
+            ipv4.method shared \
+            ipv4.addresses "${static_ip}/24" \
+            ipv4.route-metric 1000 \
+            connection.autoconnect yes \
+            connection.autoconnect-priority -100 >/dev/null 2>&1 || true
+
+        echo "  eth0 configured: Pi=${static_ip}, DHCP server active for connected devices."
+    else
+        # Manual static IP only — the connecting computer must be configured manually
+        nmcli connection add \
+            type ethernet \
+            ifname eth0 \
+            con-name "raspyjack-eth-direct" \
+            ipv4.method manual \
+            ipv4.addresses "${static_ip}/24" \
+            ipv4.route-metric 1000 \
+            connection.autoconnect yes \
+            connection.autoconnect-priority -100 >/dev/null 2>&1 || true
+
+        echo "  eth0 configured: Pi=${static_ip}. Set connecting computer to same subnet manually."
+    fi
+
+    echo "  SSH/WebUI via cable: ssh fapjack@${static_ip} / http://${static_ip}:8080"
 }
 
 set_hostname() {
@@ -381,6 +487,7 @@ main() {
             disable_main_ui
             set_hostname
             setup_network
+            setup_eth_direct
             setup_tailscale
             show_status
             echo ""

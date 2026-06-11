@@ -13,8 +13,16 @@
   "hostname": "Raspyjack",
 
   "network": {
-    "_comment": "If true, the Pi will prefer this WiFi connection over any Ethernet connection for routing.",
-    "prefer_wifi_over_ethernet": true
+    "_comment": "Network configuration for reliable access to the Pi.",
+    "prefer_wifi_over_ethernet": true,
+
+    "_wlan_static_comment": "Give the Pi a fixed IP on your phone hotspot so the WebUI is always reachable at the same address. Leave empty to use DHCP. iPhone hotspot is always 172.20.10.0/24 (gateway 172.20.10.1). Android varies — check your phone. Example: wlan_static_ip = '172.20.10.100'.",
+    "wlan_static_ip": "",
+    "wlan_gateway": "",
+
+    "_eth_comment": "Direct Ethernet (laptop-to-Pi cable) configuration. When eth_static_ip is set the Pi always has that address on eth0 and hands out DHCP so any computer that plugs in gets an IP automatically — no setup on the other computer required. Leave eth_static_ip empty to keep DHCP on eth0.",
+    "eth_static_ip": "192.168.100.1",
+    "eth_dhcp_server": true
   },
 
   "tailscale": {
@@ -28,7 +36,8 @@
     "tailscale_ipv4": "",
     "tailscale_magic_dns": "raspyjack.<your-tailnet>.ts.net",
     "mdns_name": "raspyjack.local",
-    "static_ip_on_wifi": ""
+    "static_ip_on_wifi": "",
+    "static_ip_on_ethernet": "192.168.100.1"
   },
 
   "fan_control": {
