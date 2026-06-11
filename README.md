@@ -166,6 +166,8 @@ Examples commonly used:
 
 ## 🚀 Install
 
+### Standard Install (Pi Zero 2W + LCD HAT)
+
 From a fresh Raspberry Pi OS Lite install:
 
 ```bash
@@ -180,6 +182,99 @@ reboot
 ```
 
 After reboot, RaspyJack should be available on-device.
+
+---
+
+## 🖥️ Pi 4B Headless Install (this fork)
+
+This fork adds a headless operation layer for running RaspyJack on a **Raspberry Pi 4B with no screen**, controlled entirely through the WebUI over WiFi.
+
+> **Pi Zero + LCD HAT users:** ignore this section — use the standard install above.
+
+### What this fork adds
+
+- `scripts/configure_headless.sh` — interactive first-time setup wizard (WiFi, hostname, Tailscale, fan)
+- `payloads/utilities/raspyjack_headless_setup.sh` — applies your config (WiFi client, hostname, services)
+- `payloads/hardware/dynamic_fan_control.py` — PWM fan control via MOSFET on GPIO 18
+- `scripts/shutdown_button.py` — GPIO 17 power button, hold 2s to shut down cleanly
+- `config/systemd/` — systemd service units for shutdown button and headless autostart
+- `docs/` — Pi 4B user guide, field guide, setup docs
+
+See `docs/FORK_DIFFERENCES.md` for full details.
+
+### Hardware
+
+- Raspberry Pi 4B (any RAM)
+- MicroSD card (16GB+), flashed with **Raspberry Pi OS Lite (64-bit, Bookworm)**
+- Power source (battery bank or wall)
+- Optional: fan + IRLZ44N MOSFET wired to GPIO 18 for cooling
+- Optional: momentary button wired between GPIO 17 and GND for clean shutdown
+
+### Install order
+
+**Step 1 — Clone this fork and run the main installer**
+
+```bash
+sudo apt update && sudo apt install -y git
+sudo -i
+git clone https://github.com/GG-93/Raspyjack.git Raspyjack
+cd Raspyjack
+chmod +x install_raspyjack.sh
+./install_raspyjack.sh
+reboot
+```
+
+**Step 2 — First-time headless config wizard**
+
+Run this once after rebooting. Creates `config/headless.json` with your personal settings (WiFi credentials, hostname, optional Tailscale, optional fan control). This file is gitignored and never committed.
+
+```bash
+sudo bash /root/Raspyjack/scripts/configure_headless.sh
+```
+
+**Step 3 — Apply headless config**
+
+> ⚠️ **Run this over Ethernet or USB the first time**, not over WiFi. The script briefly drops and reconnects the WiFi profile (~5 seconds). It will reconnect automatically, but Ethernet is safer for the first run.
+>
+> This does **not** touch your SSH password or any other credentials set during imaging.
+
+```bash
+sudo bash /root/Raspyjack/payloads/utilities/raspyjack_headless_setup.sh
+```
+
+To make this run automatically on every boot:
+
+```bash
+sudo bash /root/Raspyjack/payloads/utilities/raspyjack_headless_setup.sh install-service
+```
+
+**Step 4 — Access RaspyJack**
+
+Once the Pi connects to your hotspot or WiFi network:
+
+- WebUI: `http://raspyjack.local:8080`
+- SSH: `ssh <your-user>@raspyjack.local`
+
+**Step 5 — Optional: fan control and shutdown button**
+
+Fan control runs as a payload — launch `Dynamic Fan Control` from the WebUI hardware category.
+
+For the shutdown button service:
+
+```bash
+sudo cp /root/Raspyjack/config/systemd/raspyjack-shutdown.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now raspyjack-shutdown.service
+```
+
+### Reference docs
+
+| Doc | Purpose |
+|-----|---------|
+| `docs/FIELD_GUIDE.md` | Quick day-to-day reference |
+| `docs/RASPYJACK_USER_GUIDE.md` | Full Pi 4B headless guide |
+| `docs/PORTABLE_HEADLESS_SETUP.md` | Connection methods (WiFi client, USB direct, Tailscale) |
+| `docs/FORK_DIFFERENCES.md` | What this fork adds vs upstream |
 
 ---
 
